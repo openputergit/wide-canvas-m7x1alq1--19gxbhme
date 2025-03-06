@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice-Enabled Train Booking</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: #f0f2f5;
+        }
+        .listening-wave {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .wave-bar {
+            width: 3px;
+            height: 20px;
+            background: #4CAF50;
+            animation: wave 1s infinite ease-in-out;
+        }
+        .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+        .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+        .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+        @keyframes wave {
+            0%, 100% { transform: scaleY(0.5); }
+            50% { transform: scaleY(1); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="min-h-screen p-4">
+        <!-- Voice Status Indicator -->
+        <div class="fixed top-4 right-4 flex items-center gap-2 bg-white shadow-lg p-3 rounded-full z-50">
+            <div class="listening-wave" v-if="isListening">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+            <span class="text-sm" :class="isListening ? 'text-green-600' : 'text-gray-600'">
+                {{isListening ? 'Listening...' : 'Click to start'}}
+            </span>
+        </div>
+
+        <!-- Main Container -->
+        <div class="max-w-md mx-auto bg-white rounded-xl shadow-lg p-6 space-y-6 mt-16">
+            <!-- Progress Section -->
+            <div class="space-y-2">
+                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-500" 
+                         :style="`width: ${progress}%`"></div>
+                </div>
+                <p class="text-sm text-gray-600 text-right">{{progress}}% Complete</p>
+            </div>
+
+            <!-- Current Voice Input -->
+            <div v-if="currentTranscript" class="bg-blue-50 p-4 rounded-lg">
+                <p class="text-blue-700">{{currentTranscript}}</p>
+            </div>
+
+            <!-- Language Selection -->
+            <div v-if="currentStep === 'language'" class="text-center space-y-6">
+                <h1 class="text-3xl font-bold text-gray-800">Welcome</h1>
+                <p class="text-lg text-gray-600">Please select your language:</p>
+                <div class="grid grid-cols-3 gap-4">
+                    <button v-for="lang in ['English', 'हिंदी', 'தமிழ்']" 
+                            :key="lang"
+                            @click="selectLanguage(lang)"
+                            class="p-4 border rounded-lg hover:bg-gray-50">
+                        {{lang}}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Personal Details -->
+            <div v-if="currentStep === 'personal'" class="space-y-4">
+                <h2 class="text-xl font-semibold">Personal Details</h2>
+                <div v-for="(value, key) in userDetails" :key="key" 
+                     class="p-4 border rounded-lg">
+                    <p class="text-sm text-gray-500 mb-1">{{key.charAt(0).toUpperCase() + key.slice(1)}}</p>
+                    <p class="text-lg">{{value || '...' }}</p>
+                </div>
+            </div>
+
+            <!-- Journey Details -->
+            <div v-if="currentStep === 'journey'" class="space-y-4">
+                <h2 class="text-xl font-semibold">Journey Details</h2>
+                <div class="space-y-4">
+                    <div v-for="(value, key) in journeyDetails" :key="key" 
+                         class="p-4 border rounded-lg">
+                        <p class="text-sm text-gray-500 mb-1">{{key.charAt(0).toUpperCase() + key.slice(1)}}</p>
+                        <p class="text-lg">{{value || '...'}}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Train Selection -->
+            <div v-if="currentStep === 'trains'" class="space-y-4">
+                <h2 class="text-xl font-semibold">Available Trains</h2>
+                <div class="space-y-3">
+                    <div v-for="train in availableTrains" :key="train.id"
+                         class="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                         @click="selectTrain(train)">
+                        <p class="font-medium">{{train.name}}</p>
+                        <p class="text-sm text-gray-600">{{train.time}} | {{train.seats}} seats available</p>
+                        <p class="text-sm font-medium text-blue-600">₹{{train.price}}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Payment -->
+            <div v-if="currentStep === 'payment'" class="space-y-4">
+                <h2 class="text-xl font-semibold">Payment Details</h2>
+                <div class="p-4 bg-gray-50 rounded-lg">
+                    <p class="text-lg font-medium mb-2">Booking Summary</p>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p>{{selectedTrain?.name}}</p>
+                        <p>{{journeyDetails.source}} to {{journeyDetails.destination}}</p>
+                        <p>{{journeyDetails.date}}</p>
+                        <p class="text-lg font-medium text-gray-900 mt-4">
+                            Total: ₹{{selectedTrain?.price || 0}}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue
+
+        createApp({
+            data() {
+                return {
+                    isListening: false,
+                    recognition: null,
+                    currentStep: 'language',
+                    currentTranscript: '',
+                    progress: 0,
+                    selectedLanguage: '',
+                    lastPromptTime: 0,
+                    promptInterval: null,
+                    currentQuestion: '',
+                    retryCount: 0,
+                    userDetails: {
+                        name: '',
+                        phone: '',
+                        age: ''
+                    },
+                    journeyDetails: {
+                        source: '',
+                        destination: '',
+                        date: ''
+                    },
+                    availableTrains: [
+                        {id: 1, name: 'Chennai Express', time: '10:00 AM', seats: 45, price: 1200},
+                        {id: 2, name: 'Delhi Rajdhani', time: '4:00 PM', seats: 32, price: 2100},
+                        {id: 3, name: 'Duronto Express', time: '8:00 PM', seats: 28, price: 1500}
+                    ],
+                    selectedTrain: null,
+                    validationRules: {
+                        phone: /^\d{10}$/,
+                        age: /^\d{1,2}$/
+                    }
+                }
+            },
+            mounted() {
+                this.initSpeechRecognition();
+                this.startListening();
+                this.askCurrentQuestion();
+            },
+            methods: {
+                initSpeechRecognition() {
+                    if ('webkitSpeechRecognition' in window) {
+                        this.recognition = new webkitSpeechRecognition();
+                        this.recognition.continuous = true;
+                        this.recognition.interimResults = true;
+                        this.recognition.lang = 'en-US';
+
+                        this.recognition.onstart = () => {
+                            this.isListening = true;
+                        };
+
+                        this.recognition.onend = () => {
+                            this.isListening = false;
+                            setTimeout(() => this.startListening(), 1000);
+                        };
+
+                        this.recognition.onresult = (event) => {
+                            const transcript = Array.from(event.results)
+                                .map(result => result[0].transcript)
+                                .join('')
+                                .toLowerCase();
+                            
+                            this.currentTranscript = transcript;
+                            this.processVoiceInput(transcript);
+                        };
+                    }
+                },
+
+                validateInput(type, value) {
+                    if (type === 'phone') {
+                        return this.validationRules.phone.test(value);
+                    } else if (type === 'age') {
+                        return this.validationRules.age.test(value) && parseInt(value) > 0 && parseInt(value) < 120;
+                    }
+                    return true;
+                },
+
+                reprompt() {
+                    this.retryCount++;
+                    if (this.retryCount < 3) {
+                        setTimeout(() => {
+                            this.speak(this.currentQuestion, true);
+                        }, 2000);
+                    } else {
+                        this.speak("I'm having trouble understanding. Please try again or use the touch interface.", false);
+                        this.retryCount = 0;
+                    }
+                },
+
+                startListening() {
+                    if (this.recognition) {
+                        try {
+                            this.recognition.start();
+                        } catch (e) {
+                            console.log('Recognition already started');
+                        }
+                    }
+                },
+
+                speak(text, repeat = true) {
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = this.selectedLanguage === 'hindi' ? 'hi-IN' : 'en-IN';
+                    speechSynthesis.speak(utterance);
+
+                    if (repeat) {
+                        this.currentQuestion = text;
+                        this.lastPromptTime = Date.now();
+                        clearInterval(this.promptInterval);
+                        this.promptInterval = setInterval(() => {
+                            if (Date.now() - this.lastPromptTime > 30000) {
+                                this.reprompt();
+                            }
+                        }, 31000);
+                    }
+                },
+
+                processVoiceInput(transcript) {
+                    this.lastPromptTime = Date.now(); // Reset prompt timer on input
+
+                    if (this.currentStep === 'language') {
+                        if (transcript.includes('english') || transcript.includes('hindi') || transcript.includes('tamil')) {
+                            this.selectedLanguage = transcript.includes('english') ? 'english' : 
+                                                  transcript.includes('hindi') ? 'hindi' : 'tamil';
+                            this.progress = 20;
+                            this.currentStep = 'personal';
+                            this.speak(this.getLocalizedText('tellName'));
+                        }
+                    } else if (this.currentStep === 'personal') {
+                        if (!this.userDetails.name) {
+                            if (transcript.length > 2) {
+                                this.userDetails.name = transcript;
+                                this.speak(this.getLocalizedText('tellPhone'));
+                            }
+                        } else if (!this.userDetails.phone) {
+                            const numbers = transcript.match(/\d+/g);
+                            if (numbers && numbers.join('').length === 10) {
+                                this.userDetails.phone = numbers.join('');
+                                this.speak(this.getLocalizedText('tellAge'));
+                            } else {
+                                this.speak(this.getLocalizedText('invalidPhone'));
+                            }
+                        } else if (!this.userDetails.age) {
+                            const age = parseInt(transcript.match(/\d+/)?.[0]);
+                            if (age && age > 0 && age < 120) {
+                                this.userDetails.age = age;
+                                this.progress = 40;
+                                this.currentStep = 'journey';
+                                this.speak(this.getLocalizedText('tellSource'));
+                            } else {
+                                this.speak(this.getLocalizedText('invalidAge'));
+                            }
+                        }
+                    } else if (this.currentStep === 'journey') {
+                        // Similar pattern for journey details...
+                    }
+                },
+
+                getLocalizedText(key) {
+                    const texts = {
+                        tellName: {
+                            english: 'Please tell me your name',
+                            hindi: 'कृपया अपना नाम बताएं',
+                            tamil: 'உங்கள் பெயரைச் சொல்லுங்கள்'
+                        },
+                        tellPhone: {
+                            english: 'Please tell me your phone number',
+                            hindi: 'कृपया अपना फोन नंबर बताएं',
+                            tamil: 'உங்கள் தொலைபேசி எண்ணை சொல்லுங்கள்'
+                        },
+                        // Add more localizations as needed
+                    };
+                    return texts[key][this.selectedLanguage] || texts[key].english;
+                }
+            }
+        }).mount('#app')
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
